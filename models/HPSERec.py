@@ -220,17 +220,14 @@ class Trainer(embedder):
                                 torch.ones(pos_n_logits.shape).to(self.device),
                                 torch.zeros(neg_n_logits.shape).to(self.device)
                             )
-                            # 计算学生模型的损失
                             tail_loss = bce_criterion(pos_n_logits[indices], pos_n_labels[indices])
                             tail_loss += bce_criterion(neg_n_logits[indices], neg_n_labels[indices])
 
-                            # 计算蒸馏损失
                             tail_distillation_loss = distillation_loss(pos_i_logits, pos_n_logits,
                                                                        self.args.tau) + distillation_loss(neg_i_logits,
                                                                                                           neg_n_logits,
                                                                                                           self.args.tau)
 
-                            # 总损失
                             loss = tail_loss + tail_distillation_loss
 
                             loss.backward()
@@ -238,13 +235,12 @@ class Trainer(embedder):
                             training_loss += loss.item()
                     torch.cuda.empty_cache()
 
-            Resurt = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1,
+            Result = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1,
                                    k=10,
                                    is_valid='test')
-            print(Resurt)
+            print(Result)
 
             for i in range(self.args.num_experts - 2, -1, -1):
-                print(f'{i}号专家user_emb')
                 print(f"len(train_loaders[i]):{len(train_loaders[i])}")
                 for epoch in range(1, self.args.e_max + 1):
                     self.experts[i].train()
@@ -268,12 +264,7 @@ class Trainer(embedder):
                                 user_emb = beta * user_embs[i + 1][u[idx]] + user_embs[i][u[idx]]
                                 loss2 += ((user_rep[idx] - user_emb) ** 2).mean()
 
-                        # print(loss)
-                        # print(loss2)
-
-                        # 总损失
-                        total_loss = self.args.alpha * loss2
-                        # print(total_loss)
+                        total_loss = loss2
                         total_loss.backward()
                         adam_optimizers[i].step()
 
@@ -337,14 +328,11 @@ class Trainer(embedder):
             torch.save(self.validchecks[i].best_model.state_dict(), os.path.join(folder, self.validchecks[i].best_name))
             self.validchecks[i].print_result()
 
-        Resurt = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1, k=10,
+        Result = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1, k=10,
                                is_valid='test')
-        print(Resurt)
+        print(Result)
 
     def init_param(self, model):
-        """
-        Initialization of parameters
-        """
         for _, param in model.named_parameters():
             try:
                 torch.nn.init.xavier_normal_(param.data)
@@ -498,7 +486,6 @@ class Expert(torch.nn.Module):
         self.args = args
         self.device = f'cuda:{args.gpu}' if torch.cuda.is_available() else "cpu"
 
-        # Use ShareModel for embeddings
         self.share_model = sharemodel
 
         self.attention_layernorms = torch.nn.ModuleList()
@@ -507,7 +494,6 @@ class Expert(torch.nn.Module):
         self.forward_layers = torch.nn.ModuleList()
         self.last_layernorm = torch.nn.LayerNorm(args.hidden_units, eps=1e-8)
 
-        # MLP 投影头
         self.projector = torch.nn.Sequential(
             torch.nn.Linear(64, 256, bias=False),
             torch.nn.BatchNorm1d(256),
@@ -531,9 +517,6 @@ class Expert(torch.nn.Module):
             self.forward_layers.append(new_fwd_layer)
 
     def log2feats(self, log_seqs):
-        """
-        Sequence Encoder: f_{\theta}(S_u)
-        """
         seqs = self.share_model.get_item_emb(log_seqs, self.device)
         seqs += self.share_model.get_pos_emb(log_seqs, self.device)
         seqs = self.share_model.apply_dropout(seqs)
