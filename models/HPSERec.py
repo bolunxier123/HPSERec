@@ -509,10 +509,10 @@ class Expert(torch.nn.Module):
 
         # MLP 投影头
         self.projector = torch.nn.Sequential(
-            torch.nn.Linear(64, 256, bias=False),  # 输入维度由 share_model 决定
+            torch.nn.Linear(64, 256, bias=False),
             torch.nn.BatchNorm1d(256),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(256, 128, bias=True)  # 投影到对比学习的空间，默认为 128
+            torch.nn.Linear(256, 128, bias=True)
         )
 
         for _ in range(args.num_blocks):
@@ -561,10 +561,6 @@ class Expert(torch.nn.Module):
         return log_feats
 
     def forward(self, user_ids, log_seqs, pos_seqs, neg_seqs):
-        """
-        Forward pass with contrastive learning and original loss.
-        """
-        # Original forward pass for positive and negative logits
 
         log_feats = self.log2feats(log_seqs)
         pos_embs = self.share_model.get_item_emb(pos_seqs, self.device)
@@ -578,7 +574,7 @@ class Expert(torch.nn.Module):
         log_feats_1 = self.log2feats(masked_seq1)
         log_feats_2 = self.log2feats(masked_seq2)
 
-        log_feats_1 = self.projector(log_feats_1[:, -1, :])  # 取最后一个 embedding 并通过 MLP
+        log_feats_1 = self.projector(log_feats_1[:, -1, :])
         log_feats_2 = self.projector(log_feats_2[:, -1, :])
 
         log_feats_1 = F.normalize(log_feats_1, dim=-1)

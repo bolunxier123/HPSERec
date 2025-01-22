@@ -59,17 +59,14 @@ def mask_sequence(seq, overlap_rate=0.2, mask_rate=0.6, strategy='random', block
     else:
         raise ValueError(f"Unknown masking strategy: {strategy}")
 
-    # 应用重叠部分
     overlap_indices = mask_indices_1[:overlap_len]
     mask_indices_2 = torch.cat([overlap_indices, mask_indices_2[overlap_len:]])
 
-    # 构造掩码
     mask_1 = torch.zeros(seq_len, dtype=torch.bool)
     mask_2 = torch.zeros(seq_len, dtype=torch.bool)
     mask_1[mask_indices_1] = True
     mask_2[mask_indices_2] = True
 
-    # 应用掩码到序列
     masked_seq_1 = seq.clone()
     masked_seq_2 = seq.clone()
     masked_seq_1[:, ~mask_1] = 0

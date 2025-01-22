@@ -12,7 +12,6 @@ def creat_list(path):
     sorted_movie_counts = movie_counts.sort_values(ascending=True).reset_index()
     sorted_movie_counts.columns = ['movieId', 'count']
 
-    # 将结果转换为列表，每个元素是一个包含 (movieId, count) 的元组
     result_list = list(sorted_movie_counts.itertuples(index=False, name=None))
 
     return df, result_list
