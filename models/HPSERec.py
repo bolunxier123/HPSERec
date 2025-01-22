@@ -21,7 +21,6 @@ def distillation_loss(student_logits, teacher_logits, temperature=0.7):
     student_probs = F.softmax(student_logits / temperature, dim=1)
     teacher_probs = F.softmax(teacher_logits / temperature, dim=1)
 
-    # 计算KL散度
     loss = F.kl_div(student_probs.log(), teacher_probs, reduction='batchmean')
     return loss
 
@@ -34,10 +33,10 @@ class ProjectionHead(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super(ProjectionHead, self).__init__()
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(input_dim, hidden_dim, bias=False),  # 输入维度由 share_model 决定
+            torch.nn.Linear(input_dim, hidden_dim, bias=False),
             torch.nn.BatchNorm1d(hidden_dim),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(hidden_dim, output_dim, bias=True)  # 投影到对比学习的空间，默认为 128
+            torch.nn.Linear(hidden_dim, output_dim, bias=True)
         )
 
     def forward(self, x):
@@ -85,7 +84,6 @@ class Trainer(embedder):
         set_tail = set(df['movieId'])
         self.tail_num = len(set_tail)
 
-        # Build the train, valid, test datasets
 
         train_dataset = TrainData(self.train_data, self.user_num, self.item_num, batch_size=self.args.batch_size,
                                   maxlen=self.args.maxlen)
@@ -125,7 +123,7 @@ class Trainer(embedder):
         bce_criterion = torch.nn.BCEWithLogitsLoss()
         adam_optimizers = [torch.optim.Adam(self.experts[i].parameters(), lr=self.args.lr, betas=(0.9, 0.98)) for i in
                            range(self.args.num_experts)]
-        self.bce_criterion = torch.nn.BCEWithLogitsLoss()  # 二分类损失函数
+        self.bce_criterion = torch.nn.BCEWithLogitsLoss()
 
         big_epoch = 200
 
@@ -164,7 +162,6 @@ class Trainer(embedder):
                                     c += 1
                             user_lens[i][u[idx]] = c
 
-                        # 总损失
                         total_loss = loss
                         total_loss.backward()
                         adam_optimizers[i].step()
@@ -383,7 +380,6 @@ class Trainer(embedder):
 
             NDCG += np.sum(1 / np.log2(rank[hit_user] + 2)).item()
 
-        # Calculate average HIT and NDCG across all users
         result = {
             'HIT': HIT / n_all_user,
             'NDCG': NDCG / n_all_user
@@ -595,7 +591,6 @@ class Expert(torch.nn.Module):
 
         contrastive_loss = F.cross_entropy(similarity_matrix, target)
 
-        # Return contrastive loss and original logits (pos_logits, neg_logits)
         return pos_logits, neg_logits, contrastive_loss
 
     def predict(self, log_seqs, item_indices):
