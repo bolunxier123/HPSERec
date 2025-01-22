@@ -4,10 +4,6 @@ import numpy as np
 
 class NegativeSampler(object):
     def __init__(self, args, dataset):
-        """
-        For inference stage, sample the negative items not interacted with user
-        dataset : [user_train, user_valid, user_test, user_time_diff, usernum, itemnum]
-        """
         self.args = args
         self.dataset = dataset
         self.usernum = dataset[4]  # User num
@@ -22,59 +18,28 @@ class NegativeSampler(object):
         else:
             return self.negative_samples_valid[user]
 
-    # def get_random_negative(self, valid_or_test):
-    #     """
-    #     For testing, bring the random items not included in user sequence
-    #     """
-    #     np.random.seed(self.args.seed)
-    #     negative_samples = {}
-    #     for user in np.arange(1, self.usernum + 1):
-    #         if len(self.dataset[2][user]) < 1:
-    #             continue
-    #         seen = set(self.dataset[0][user])
-    #
-    #         seen.add(0)
-    #         samples = []
-    #         if valid_or_test == 'test':
-    #             seen.add(self.dataset[1][user][0])
-    #             samples.append(self.dataset[2][user][0])  # Put gt item
-    #         else:
-    #             samples.append(self.dataset[1][user][0])  # Put gt item
-    #         for _ in range(self.args.n_negative_samples):
-    #             t = np.random.randint(1, self.itemnum + 1)
-    #             while t in seen: t = np.random.randint(1, self.itemnum + 1)
-    #             samples.append(t)
-    #             seen.add(t)
-    #         negative_samples[user] = samples
-    #     return negative_samples
+
 
     def get_random_negative(self, valid_or_test):
-        """
-        For testing, generate random items not included in the user's sequence.
-        """
         np.random.seed(self.args.seed)
         negative_samples = {}
 
         for user in np.arange(1, self.usernum + 1):
-            # 检查 self.dataset 是否包含当前用户，且该用户在 self.dataset[2] 中有数据
             user_data = self.dataset[2].get(user, [])
             if len(user_data) < 1:
-                continue  # 跳过没有数据的用户
+                continue
 
             seen = set(self.dataset[0].get(user, []))
-            seen.add(0)  # 避免选择 ID 为 0 的物品
+            seen.add(0)
 
             samples = []
 
             if valid_or_test == 'test':
-                # 将测试集中的 gt 项添加到 seen 集合中以避免抽取
                 seen.add(self.dataset[1].get(user, [0])[0])
-                # 将 ground truth 项放入 samples
                 samples.append(user_data[0])
             else:
-                samples.append(self.dataset[1].get(user, [0])[0])  # 将 gt 项添加到验证集
+                samples.append(self.dataset[1].get(user, [0])[0])
 
-            # 随机生成负样本并确保不在 seen 集合中
             for _ in range(self.args.n_negative_samples):
                 t = np.random.randint(1, self.itemnum + 1)
                 while t in seen:

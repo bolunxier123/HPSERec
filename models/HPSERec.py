@@ -18,7 +18,6 @@ from tqdm import tqdm
 
 
 def distillation_loss(student_logits, teacher_logits, temperature=0.7):
-    # 将logits转换为概率分布
     student_probs = F.softmax(student_logits / temperature, dim=1)
     teacher_probs = F.softmax(teacher_logits / temperature, dim=1)
 
@@ -28,7 +27,6 @@ def distillation_loss(student_logits, teacher_logits, temperature=0.7):
 
 
 def bpr_loss(pos_logits, neg_logits):
-    """Computes the BPR loss."""
     return -torch.mean(torch.log(torch.sigmoid(pos_logits - neg_logits)))
 
 
@@ -136,9 +134,7 @@ class Trainer(embedder):
         n = self.args.num_experts - 1
 
         for E in tqdm(range(big_epoch)):
-            # for i in range(3):
             for i in range(self.args.num_experts):
-                print(f'{i}号专家训练')
                 print(f"len(train_loaders[i]):{len(train_loaders[i])}")
                 for epoch in range(1, self.args.e_max + 1):
                     self.experts[i].train()
@@ -200,7 +196,6 @@ class Trainer(embedder):
 
                 torch.cuda.empty_cache()
                 self.validchecks[i].print_result()
-                print(f'expect[{i}]向expect[j]知识蒸馏')
                 for j in range(i + 1, i + 2):
                     if j == self.args.num_experts:
                         break
@@ -215,12 +210,10 @@ class Trainer(embedder):
                             u, seq, pos, neg = np.array(u), np.array(seq), np.array(pos), np.array(neg)
 
                             indices = np.where(pos != 0)
-                            # 获取教师模型的输出
                             pos_i_logits, neg_i_logits, contrastiveLoss_i = self.experts[i](u, seq, pos, neg)
 
                             pos_n_logits, neg_n_logits, _ = self.experts[j](u, seq, pos, neg)
 
-                            # 构建标签
                             pos_i_labels, neg_i_labels = (
                                 torch.ones(pos_i_logits.shape).to(self.device),
                                 torch.zeros(neg_i_logits.shape).to(self.device)
@@ -248,7 +241,6 @@ class Trainer(embedder):
                             training_loss += loss.item()
                     torch.cuda.empty_cache()
 
-            # user_embs对比
             Resurt = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1,
                                    k=10,
                                    is_valid='test')
@@ -465,7 +457,6 @@ class Trainer(embedder):
             HEAD_USER_NDCG += sum(ndcg[u_head[hit_user[u_head]]])
             TAIL_USER_NDCG += sum(ndcg[u_tail[hit_user[u_tail]]])
 
-        # Calculate average HIT and NDCG across all users
         result = {'Overall': {'NDCG': NDCG / n_all_user, 'HIT': HIT / n_all_user},
                   'Head_User': {'NDCG': HEAD_USER_NDCG / n_head_user, 'HIT': HEAD_USER_HIT / n_head_user},
                   'Tail_User': {'NDCG': TAIL_USER_NDCG / n_tail_user, 'HIT': TAIL_USER_HIT / n_tail_user},
@@ -487,33 +478,25 @@ class ShareModel(torch.nn.Module):
         self.emb_dropout = torch.nn.Dropout(p=dropout_rate)
 
     def get_item_emb(self, item_seq, device):
-        """Get item embeddings."""
         item_embs = self.item_emb(torch.LongTensor(item_seq).to(device))
         item_embs *= self.item_emb.embedding_dim ** 0.5  # Scale embedding
         return item_embs
 
     def get_single_item_emb(self, item_id, device):
-        """Get embedding for a single item."""
         item_emb = self.item_emb(torch.LongTensor([item_id]).to(device))
         item_emb *= self.item_emb.embedding_dim ** 0.5  # Scale embedding
         return item_emb
 
     def get_pos_emb(self, log_seqs, device):
-        """Get positional embeddings."""
         positions = np.tile(np.array(range(log_seqs.shape[1])), [log_seqs.shape[0], 1])
         pos_embs = self.pos_emb(torch.LongTensor(positions).to(device))
         return pos_embs
 
     def apply_dropout(self, seqs):
-        """Apply dropout to sequences."""
         return self.emb_dropout(seqs)
 
 
 class Expert(torch.nn.Module):
-    """
-    Parameter of SASRec
-    """
-
     def __init__(self, args, sharemodel):
         super(Expert, self).__init__()
         self.args = args
@@ -599,22 +582,17 @@ class Expert(torch.nn.Module):
         log_feats_1 = self.log2feats(masked_seq1)
         log_feats_2 = self.log2feats(masked_seq2)
 
-        # MLP 投影到对比空间
         log_feats_1 = self.projector(log_feats_1[:, -1, :])  # 取最后一个 embedding 并通过 MLP
         log_feats_2 = self.projector(log_feats_2[:, -1, :])
 
-        # 特征归一化（SimCLR 提倡使用 L2 正则化）
         log_feats_1 = F.normalize(log_feats_1, dim=-1)
         log_feats_2 = F.normalize(log_feats_2, dim=-1)
 
-        # 构造相似性矩阵（对称的）
         similarity_matrix = torch.matmul(log_feats_1, log_feats_2.T) / self.args.tau
 
-        # 对角线上的为正样本，其他为负样本
         batch_size = log_seqs.shape[0]
         target = torch.arange(batch_size).to(self.device)
 
-        # 对比损失（InfoNCE Loss）
         contrastive_loss = F.cross_entropy(similarity_matrix, target)
 
         # Return contrastive loss and original logits (pos_logits, neg_logits)
@@ -635,9 +613,6 @@ class Expert(torch.nn.Module):
         return logits
 
     def user_representation(self, log_seqs):
-        """
-        User representation
-        """
         log_feats = self.log2feats(log_seqs)
         final_feat = log_feats[:, -1, :]
         return final_feat
