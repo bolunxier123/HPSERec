@@ -47,19 +47,16 @@ def devicer(dataset):
     list_tail = []
 
     with open(dataset + '_mid.txt', 'r') as file:
-        # 逐行读取文件
         for line in file:
             movie_id = int(line.strip())
             list_mid.append(movie_id)
 
     with open(dataset + '_head.txt', 'r') as file:
-        # 逐行读取文件
         for line in file:
             movie_id = int(line.strip())
             list_head.append(movie_id)
 
     with open(dataset + '_tail.txt', 'r') as file:
-        # 逐行读取文件
         for line in file:
             movie_id = int(line.strip())
             list_tail.append(movie_id)
