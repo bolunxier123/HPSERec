@@ -26,6 +26,7 @@ def distillation_loss(student_logits, teacher_logits, temperature=0.7):
 
 
 def bpr_loss(pos_logits, neg_logits):
+    """Computes the BPR loss."""
     return -torch.mean(torch.log(torch.sigmoid(pos_logits - neg_logits)))
 
 
@@ -78,12 +79,6 @@ class Trainer(embedder):
         self.inference_negative_samplers = [NegativeSampler(self.args, self.datasets[i]) for i in
                                             range(self.args.num_experts)]
         self.projection_head = ProjectionHead(64, 256, 128).to(self.device)
-        df = pd.read_csv('dataset/BeautyTail.txt', sep=' ', header=None)
-        df.columns = ['userId', 'movieId', 'timestamp']
-
-        set_tail = set(df['movieId'])
-        self.tail_num = len(set_tail)
-
 
         train_dataset = TrainData(self.train_data, self.user_num, self.item_num, batch_size=self.args.batch_size,
                                   maxlen=self.args.maxlen)
@@ -125,7 +120,7 @@ class Trainer(embedder):
                            range(self.args.num_experts)]
         self.bce_criterion = torch.nn.BCEWithLogitsLoss()
 
-        big_epoch = 200
+        big_epoch = 30
 
         user_embs = [{} for _ in range(self.args.num_experts)]
         user_lens = [{} for _ in range(self.args.num_experts)]
@@ -178,7 +173,6 @@ class Trainer(embedder):
                         best_valid = self.validchecks[i](result_valid, epoch, self.experts[i],
                                                          f'{self.args.model}_{self.args.dataset}{i}.pth')
 
-                        # Evaluation
                 with torch.no_grad():
                     self.validchecks[i].best_model.eval()
                     result_5 = self.evaluate_with_tail(self.validchecks[i].best_model, n, k=5, is_valid='test')
@@ -228,19 +222,19 @@ class Trainer(embedder):
                                                                                                           neg_n_logits,
                                                                                                           self.args.tau)
 
-                            loss = tail_loss + tail_distillation_loss
+                            loss = tail_loss + 1.2*tail_distillation_loss
 
                             loss.backward()
                             adam_optimizers[j].step()
                             training_loss += loss.item()
                     torch.cuda.empty_cache()
-
-            Result = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1,
+            Resurt = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1,
                                    k=10,
                                    is_valid='test')
-            print(Result)
+            print(Resurt)
 
             for i in range(self.args.num_experts - 2, -1, -1):
+                print(f'{i}号专家user_emb')
                 print(f"len(train_loaders[i]):{len(train_loaders[i])}")
                 for epoch in range(1, self.args.e_max + 1):
                     self.experts[i].train()
@@ -251,24 +245,48 @@ class Trainer(embedder):
                         u, seq, pos, neg = np.array(u), np.array(seq), np.array(pos), np.array(neg)
                         user_rep = self.experts[i].user_representation(seq)
 
-                        loss2 = 0
-                        for idx in range(len(user_rep)):
-                            if u[idx] in user_embs[i + 1]:
-                                sui1 = user_lens[i + 1][u[idx]]
-                                su = user_lens[i][u[idx]]
-                                # print(su)
-                                if su == 0:
-                                    continue
-                                frac = (sui1 - su) / su
-                                beta = 2 / (1 + math.e * (self.args.sigamma * (E / big_epoch + frac)))
-                                user_emb = beta * user_embs[i + 1][u[idx]] + user_embs[i][u[idx]]
-                                loss2 += ((user_rep[idx] - user_emb) ** 2).mean()
+                        u_seq = np.array(seq)
+                        u_ids = np.array(u)
 
+                        user_rep_current = self.experts[i].user_representation(u_seq)
+
+                        user_rep_prev = []
+                        valid_idx = []
+                        for idx in range(len(u_ids)):
+                            if u_ids[idx] in user_embs[i + 1]:
+                                user_rep_prev.append(user_embs[i + 1][u_ids[idx]].unsqueeze(0))
+                                valid_idx.append(idx)
+                        if len(user_rep_prev) == 0:
+                            continue
+                        user_rep_prev = torch.cat(user_rep_prev, dim=0)
+
+                        user_rep_current_valid = user_rep_current[valid_idx]
+
+                        user_rep_current_valid = torch.nn.functional.normalize(user_rep_current_valid, p=2, dim=1)
+                        user_rep_prev = torch.nn.functional.normalize(user_rep_prev, p=2, dim=1)
+
+                        cos_sim = user_rep_current_valid @ user_rep_prev.T  # 余弦相似度
+                        cost_matrix = 1.0 - cos_sim
+                        cost_matrix = torch.clamp(cost_matrix, min=0.0, max=2.0)
+
+                        epsilon = cost_matrix.mean().item() * 0.5
+                        epsilon = max(epsilon, 1e-2)
+                        K = torch.exp(-cost_matrix / epsilon)
+                        K = K + 1e-8
+                        u = torch.ones(K.size(0), 1, device=self.device) / K.size(0)
+                        v = torch.ones(K.size(1), 1, device=self.device) / K.size(1)
+
+                        for _ in range(30):
+                            u = (1.0 / (K.matmul(v) + 1e-8))
+                            v = (1.0 / (K.T.matmul(u) + 1e-8))
+
+                        gamma = torch.diagflat(u) @ K @ torch.diagflat(v)
+
+                        loss2 = torch.sum(gamma * cost_matrix)
+                        training_loss+=loss2
                         total_loss = loss2
                         total_loss.backward()
                         adam_optimizers[i].step()
-
-                        training_loss += total_loss.item()
 
                     if epoch % 10 == 0:
                         print(
@@ -280,7 +298,6 @@ class Trainer(embedder):
                         best_valid = self.validchecks[i](result_valid, epoch, self.experts[i],
                                                          f'{self.args.model}_{self.args.dataset}{i}.pth')
 
-                        # Evaluation
                 with torch.no_grad():
                     self.validchecks[i].best_model.eval()
                     result_5 = self.evaluate_with_tail(self.validchecks[i].best_model, n, k=5, is_valid='test')
@@ -328,11 +345,14 @@ class Trainer(embedder):
             torch.save(self.validchecks[i].best_model.state_dict(), os.path.join(folder, self.validchecks[i].best_name))
             self.validchecks[i].print_result()
 
-        Result = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1, k=10,
+        Resurt = self.evaluate(self.validchecks[self.args.num_experts - 1].best_model, self.args.num_experts - 1, k=10,
                                is_valid='test')
-        print(Result)
+        print(Resurt)
 
     def init_param(self, model):
+        """
+        Initialization of parameters
+        """
         for _, param in model.named_parameters():
             try:
                 torch.nn.init.xavier_normal_(param.data)
@@ -358,8 +378,7 @@ class Trainer(embedder):
         n_all_user = 0.0  # Total number of users
 
         for _, (u, seq, item_idx, test_idx) in enumerate(loader):
-            predictions = -model.predict(seq.numpy(), item_idx.numpy())  # Sequence Encoder
-            # print(f"predictions:{predictions.shape}")
+            predictions = -model.predict(seq.numpy(), item_idx.numpy())
 
             rank = predictions.argsort(1).argsort(1)[:, 0].cpu().numpy()
             n_all_user += len(predictions)
@@ -392,8 +411,8 @@ class Trainer(embedder):
         elif is_head == 'tail' and is_valid == 'valid':
             loader = self.valid_loader_tails[i]
 
-        HIT = 0.0  # Overall Hit
-        NDCG = 0.0  # Overall NDCG
+        HIT = 0.0
+        NDCG = 0.0
 
         TAIL_USER_NDCG = 0.0
         HEAD_USER_NDCG = 0.0
@@ -412,12 +431,11 @@ class Trainer(embedder):
         n_tail_item = 0.0
 
         for _, (u, seq, item_idx, test_idx) in enumerate(loader):
-            u_head = (self.u_head_set[None, ...] == u.numpy()[..., None]).nonzero()[0]  # Index of head users
-            u_tail = np.setdiff1d(np.arange(len(u)), u_head)  # Index of tail users
-            i_head = (self.i_head_set[None, ...] == test_idx.numpy()[..., None]).nonzero()[0]  # Index of head items
-            i_tail = np.setdiff1d(np.arange(len(u)), i_head)  # Index of tail items
-            predictions = -model.predict(seq.numpy(), item_idx.numpy())  # Sequence Encoder
-            # print(f"predictions:{predictions.shape}")
+            u_head = (self.u_head_set[None, ...] == u.numpy()[..., None]).nonzero()[0]
+            u_tail = np.setdiff1d(np.arange(len(u)), u_head)
+            i_head = (self.i_head_set[None, ...] == test_idx.numpy()[..., None]).nonzero()[0]
+            i_tail = np.setdiff1d(np.arange(len(u)), i_head)
+            predictions = -model.predict(seq.numpy(), item_idx.numpy())
 
             rank = predictions.argsort(1).argsort(1)[:, 0].cpu().numpy()
             n_all_user += len(predictions)
@@ -462,25 +480,33 @@ class ShareModel(torch.nn.Module):
         self.emb_dropout = torch.nn.Dropout(p=dropout_rate)
 
     def get_item_emb(self, item_seq, device):
+        """Get item embeddings."""
         item_embs = self.item_emb(torch.LongTensor(item_seq).to(device))
         item_embs *= self.item_emb.embedding_dim ** 0.5  # Scale embedding
         return item_embs
 
     def get_single_item_emb(self, item_id, device):
+        """Get embedding for a single item."""
         item_emb = self.item_emb(torch.LongTensor([item_id]).to(device))
         item_emb *= self.item_emb.embedding_dim ** 0.5  # Scale embedding
         return item_emb
 
     def get_pos_emb(self, log_seqs, device):
+        """Get positional embeddings."""
         positions = np.tile(np.array(range(log_seqs.shape[1])), [log_seqs.shape[0], 1])
         pos_embs = self.pos_emb(torch.LongTensor(positions).to(device))
         return pos_embs
 
     def apply_dropout(self, seqs):
+        """Apply dropout to sequences."""
         return self.emb_dropout(seqs)
 
 
 class Expert(torch.nn.Module):
+    """
+    Parameter of SASRec
+    """
+
     def __init__(self, args, sharemodel):
         super(Expert, self).__init__()
         self.args = args
@@ -495,10 +521,10 @@ class Expert(torch.nn.Module):
         self.last_layernorm = torch.nn.LayerNorm(args.hidden_units, eps=1e-8)
 
         self.projector = torch.nn.Sequential(
-            torch.nn.Linear(64, 256, bias=False),
+            torch.nn.Linear(64, 256, bias=False),  # 输入维度由 share_model 决定
             torch.nn.BatchNorm1d(256),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(256, 128, bias=True)
+            torch.nn.Linear(256, 128, bias=True)  # 投影到对比学习的空间，默认为 128
         )
 
         for _ in range(args.num_blocks):
@@ -552,7 +578,6 @@ class Expert(torch.nn.Module):
         pos_logits = (log_feats * pos_embs).sum(dim=-1)
         neg_logits = (log_feats * neg_embs).sum(dim=-1)
 
-        # Contrastive learning process
         masked_seq1, masked_seq2 = mask_sequence(log_seqs)
         log_feats_1 = self.log2feats(masked_seq1)
         log_feats_2 = self.log2feats(masked_seq2)
@@ -563,13 +588,17 @@ class Expert(torch.nn.Module):
         log_feats_1 = F.normalize(log_feats_1, dim=-1)
         log_feats_2 = F.normalize(log_feats_2, dim=-1)
 
+        # 构造相似性矩阵（对称的）
         similarity_matrix = torch.matmul(log_feats_1, log_feats_2.T) / self.args.tau
 
+        # 对角线上的为正样本，其他为负样本
         batch_size = log_seqs.shape[0]
         target = torch.arange(batch_size).to(self.device)
 
+        # 对比损失（InfoNCE Loss）
         contrastive_loss = F.cross_entropy(similarity_matrix, target)
 
+        # Return contrastive loss and original logits (pos_logits, neg_logits)
         return pos_logits, neg_logits, contrastive_loss
 
     def predict(self, log_seqs, item_indices):
@@ -587,6 +616,9 @@ class Expert(torch.nn.Module):
         return logits
 
     def user_representation(self, log_seqs):
+        """
+        User representation
+        """
         log_feats = self.log2feats(log_seqs)
         final_feat = log_feats[:, -1, :]
         return final_feat
