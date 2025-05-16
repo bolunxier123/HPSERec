@@ -7,6 +7,9 @@ import torch
 
 class embedder(torch.nn.Module):
     def __init__(self, args, logger):
+        """
+        For generating train, valid, test data
+        """
         super(embedder, self).__init__()
         self.args = args
         self.logger = logger
@@ -19,12 +22,15 @@ class embedder(torch.nn.Module):
         self.Tail = self.data_partition(args.Tail)
 
         [self.train_data, self.valid_data, self.test_data, self.time_diff, self.user_num, self.item_num] = self.dataset
+        # [self.train_data_mid, self.valid_data_mid, self.test_data_mid, self.time_diff_mid, self.user_num_mid,
+        #  self.item_num_mid] = self.dataset_mid
         [self.train_data_tail, self.valid_data_tail, self.test_data_tail, self.time_diff_tail, self.user_num_tail,
          self.item_num_tail] = self.dataset_tail
         self.num_batch = len(self.train_data) // args.batch_size
 
         [self.Head_train_data, self.Head_valid_data, self.Head_test_data, self.Head_time_diff, self.Head_user_num,
          self.Head_item_num] = self.Head
+        # [self.Mid_train_data, self.Mid_valid_data, self.Mid_test_data, self.Mid_time_diff, self.Mid_user_num, self.Mid_item_num] = self.Mid
         [self.Tail_train_data, self.Tail_valid_data, self.Tail_test_data, self.Tail_time_diff, self.Tail_user_num,
          self.Tail_item_num] = self.Tail
 
@@ -35,6 +41,9 @@ class embedder(torch.nn.Module):
             *self.Datasets)
 
     def split_head_tail(self):
+        """
+        Split user and items into head or tail sets
+        """
         all_seq_len = []
         all_item_train = []
         u_head_set = set()
@@ -124,6 +133,9 @@ class embedder(torch.nn.Module):
 
     def data_partition(self, fname):
 
+        """
+        Bring the train, valid, test data
+        """
         num = {'usernum': 0, 'itemnum': 0, 'max_user_length': 0, 'min_user_length': 100000, 'test_user': 0,
                'total_interaction': 0}
         user_train = {}
@@ -185,6 +197,9 @@ class embedder(torch.nn.Module):
 
     def data_partition2(self, fname, idx):
 
+        """
+        Bring the train, valid, test data
+        """
         num = {'usernum': 0, 'itemnum': 0, 'max_user_length': 0, 'min_user_length': 100000, 'test_user': 0,
                'total_interaction': 0}
         user_train = {}

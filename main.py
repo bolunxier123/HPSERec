@@ -6,7 +6,11 @@ def main():
     args = parse_args() 
     # torch.set_num_threads(4)
 
-    if args.model == "HPSERec":
+    if args.model == "SASRec":
+        from models.SASRec import Trainer
+        embedder = Trainer(args)
+
+    elif args.model == "HPSERec":
         from models.HPSERec import Trainer
         embedder = Trainer(args)
 
